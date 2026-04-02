@@ -365,6 +365,10 @@ tr:hover td{background:#fafbff;cursor:pointer}
     <div class="kpi" style="border-left:3px solid #ef4444"><div class="kl">Below Expected</div><div class="kv" id="belowCount" style="color:#ef4444">—</div><div class="ks" id="belowNames" style="font-size:.65rem">—</div></div>
     <div class="kpi"><div class="kl">Ramadan Adj.</div><div class="kv">5.5h</div><div class="ks">Mar 1–18 · 7h/day after</div></div>
   </div>
+  <div style="margin-bottom:16px;padding:12px;background:#f0f9ff;border-radius:8px;border-left:4px solid #0ea5e9;display:flex;gap:12px;align-items:center">
+    <span style="flex:1;font-size:.9rem;color:#0369a1"><strong>📊 Share with Management:</strong> Export this dashboard with your vacation day adjustments already baked in.</span>
+    <button onclick="exportDashboardWithVacation()" style="padding:8px 16px;background:#0ea5e9;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:.9rem">📥 Export with Vacation Days</button>
+  </div>
   <div class="g1"><div class="card">
     <div class="ct">Full-Timer Utilization vs Expected</div>
     <div class="cs">Logged vs available capacity · <span style="color:#10b981">green ≥100%</span> · indigo 80–99% · grey &lt;80%</div>
@@ -627,7 +631,17 @@ let _filState = { role: 'All', members: [] };
 
 // ── Vacation state: per-FT member {ramadan: N, regular: M} ─
 let _vac = {};
-(function initVac(){ Object.keys(CAP_BASE).forEach(n=>{ _vac[n]={ramadan:0,regular:0}; }); })();
+(function initVac(){
+  // Load from browser storage if available
+  const saved=localStorage.getItem('_vac_state');
+  if(saved) {
+    try { _vac=JSON.parse(saved); } catch(e) { console.log('Vacation state load failed'); }
+  }
+  // Ensure all FT members exist in _vac
+  Object.keys(CAP_BASE).forEach(n=>{
+    if(!_vac[n]) _vac[n]={ramadan:0,regular:0};
+  });
+})();
 
 // ── Effective capacity (adjusted for vacation days) ─────────
 // Ramadan day off = 5.5h deducted; regular day off = 7h deducted
@@ -1188,6 +1202,8 @@ function buildUtil(){
 function setVac(name, type, val){
   if(!_vac[name]) _vac[name]={ramadan:0,regular:0};
   _vac[name][type] = Math.max(0, parseFloat(val)||0);
+  // Save to browser storage
+  localStorage.setItem('_vac_state', JSON.stringify(_vac));
   // Live-update just the affected row without full rebuild
   const safe=name.replace(/[^a-z0-9]/gi,'_');
   const v=USERS[name]||{dev:0,mtg:0,total:0};
@@ -1232,6 +1248,50 @@ function setVac(name, type, val){
       }}},
       scales:{y:{min:0,max:maxU,grid:{color:'#f0f2f5'},ticks:{callback:v=>v+'h'}},x:{grid:{display:false}}}}
   });
+}
+
+// ── Export dashboard with vacation days embedded ────────────
+function exportDashboardWithVacation(){
+  // Check if any vacation days are set
+  const hasVac=Object.values(_vac).some(v=>v.ramadan>0||v.regular>0);
+  if(!hasVac){
+    alert('⚠️ No vacation days entered. Add some before exporting.');
+    return;
+  }
+
+  // Generate the vacation constant
+  const vacConst=`const _vacSettings = ${JSON.stringify(_vac, null, 2)};`;
+
+  // Get current HTML
+  const html=document.documentElement.outerHTML;
+
+  // Find where to inject the vacation settings (after _vac initialization)
+  const initVacIdx=html.indexOf('(function initVac(){');
+  if(initVacIdx===-1){
+    alert('⚠️ Could not modify dashboard. Please contact support.');
+    return;
+  }
+
+  // Find the closing of initVac
+  const initVacEnd=html.indexOf('})();',initVacIdx)+5;
+
+  // Inject the vacation settings constant right after initVac
+  const modified=html.slice(0,initVacEnd)+
+    `\n\n// ── Embedded vacation days (for report sharing) ──\n${vacConst}\n// Load embedded vacation days on init\n(function loadVac(){ if(typeof _vacSettings !== 'undefined') _vac=JSON.parse(JSON.stringify(_vacSettings)); })();\n` +
+    html.slice(initVacEnd);
+
+  // Create blob and download
+  const blob=new Blob([modified], {type:'text/html'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const now=new Date();
+  const dateStr=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  a.href=url;
+  a.download=`clockify-dashboard-${dateStr}-with-vacation.html`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  alert(`✅ Dashboard exported!\nFile: clockify-dashboard-${dateStr}-with-vacation.html\n\nShare this file with management — vacation days are already baked in.`);
 }
 
 // ══════════════════ DEVOPS BUILD ══════════════════
